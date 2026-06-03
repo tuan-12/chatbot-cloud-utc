@@ -1,5 +1,6 @@
 import os
 import io
+import struct
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 import google.generativeai as genai
@@ -8,8 +9,8 @@ from gtts import gTTS
 
 app = FastAPI()
 
-# 🔑 DÁN MÃ API KEY GEMINI THẬT CỦA NHÓM VÀO ĐÂY
-GEMINI_API_KEY = "AQ.Ab8RN6IM2ruaUoozboSbIG-vHBQgl_UOr5y6e6O-S1n2uSJgWg"
+# 🔑 DÁN CHÍNH XÁC MÃ API KEY BẮT ĐẦU BẰNG CHỮ AIza... VÀO ĐÂY NHA NHÓM
+GEMINI_API_KEY = "AQ.Ab8RN6JIFZQFmC6xpcC3FrjWztzR0E3gD1LDOkFsxeTJdxGsPg"
 genai.configure(api_key=GEMINI_API_KEY)
 
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -22,26 +23,22 @@ async def root():
 @app.post("/api/iot/audio")
 async def handle_audio_chat(file: UploadFile = File(...)):
     try:
-        # Đọc dữ liệu âm thanh thô từ mạch gửi lên
         audio_bytes = await file.read()
-        print(f"Nhận được file âm thanh dung lượng: {len(audio_bytes)} bytes")
+        print(f"Nhan duoc file am thanh: {len(audio_bytes)} bytes")
         
         if len(audio_bytes) < 1000:
-            raise ValueError("File âm thanh quá nhỏ hoặc trống rỗng!")
+            raise ValueError("File am thanh trong!")
 
-        # Tự động tạo tiêu đề WAV chuẩn (Header) cho dữ liệu thô từ ESP32
         sample_rate = 16000
         bits_per_sample = 16
         channels = 1
         
         wav_buf = io.BytesIO()
-        # Ghi Header cho file WAV để SpeechRecognition đọc được
-        import struct
         wav_buf.write(b'RIFF')
         wav_buf.write(struct.pack('<I', 36 + len(audio_bytes)))
         wav_buf.write(b'WAVEfmt ')
         wav_buf.write(struct.pack('<I', 16))
-        wav_buf.write(struct.pack('<H', 1)) # PCM
+        wav_buf.write(struct.pack('<H', 1)) 
         wav_buf.write(struct.pack('<H', channels))
         wav_buf.write(struct.pack('<I', sample_rate))
         wav_buf.write(struct.pack('<I', sample_rate * channels * bits_per_sample // 8))
@@ -52,19 +49,16 @@ async def handle_audio_chat(file: UploadFile = File(...)):
         wav_buf.write(audio_bytes)
         wav_buf.seek(0)
 
-        # Tiến hành nhận diện giọng nói tiếng Việt
         with sr.AudioFile(wav_buf) as source:
             audio_data = r.record(source)
             cau_hoi_text = r.recognize_google(audio_data, language="vi-VN")
         
-        print(f"[UTC CHATBOT]: Đã nghe được -> {cau_hoi_text}")
+        print(f"[UTC]: {cau_hoi_text}")
         
-        # Hỏi não bộ Gemini vạn năng
         response = model.generate_content(cau_hoi_text)
         reply_text = response.text
-        print(f"[AI PHẢN HỒI]: {reply_text}")
+        print(f"[AI]: {reply_text}")
         
-        # Chuyển chữ thành tiếng nói phát ra loa
         tts = gTTS(text=reply_text, lang='vi')
         mp3_fp = io.BytesIO()
         tts.write_to_fp(mp3_fp)
@@ -72,9 +66,6 @@ async def handle_audio_chat(file: UploadFile = File(...)):
         
         return StreamingResponse(mp3_fp, media_type="audio/mp3")
         
-    except sr.UnknownValueError:
-        print("Lỗi: Google không nhận diện được từ ngữ.")
-        return StreamingResponse(io.BytesIO(b""), media_type="audio/mp3")
     except Exception as e:
-        print(f"Lỗi hệ thống: {e}")
+        print(f"Loi: {e}")
         return StreamingResponse(io.BytesIO(b""), media_type="audio/mp3")
