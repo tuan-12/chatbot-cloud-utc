@@ -1,14 +1,13 @@
 import os
 import io
 import struct
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import speech_recognition as sr
 from gtts import gTTS
 
-# Khởi tạo Server với cấu hình mở rộng cổng nhận file lớn
 app = FastAPI()
 
 app.add_middleware(
@@ -39,8 +38,8 @@ async def handle_audio_chat(file: UploadFile = File(...)):
         if len(audio_bytes) < 1000:
             return StreamingResponse(io.BytesIO(b""), media_type="audio/mp3")
 
-        # Khởi tạo tiêu đề WAV chuẩn theo tần số 12000Hz siêu nhẹ
-        sample_rate = 12000
+        # Khởi tạo tiêu đề WAV chuẩn 16000Hz từ dữ liệu mạch gửi lên
+        sample_rate = 16000
         bits_per_sample = 16
         channels = 1
         
@@ -60,22 +59,22 @@ async def handle_audio_chat(file: UploadFile = File(...)):
         wav_buf.write(audio_bytes)
         wav_buf.seek(0)
 
-        # Tiến hành dịch giọng nói sang chữ tiếng Việt
+        # Tiến hành dịch giọng nói tiếng Việt
         try:
             with sr.AudioFile(wav_buf) as source:
                 audio_data = r.record(source)
                 cau_hoi_text = r.recognize_google(audio_data, language="vi-VN")
             print(f"[RENDER LOG]: Đã nghe được -> {cau_hoi_text}")
         except Exception as e:
-            print("[RENDER LOG]: Không nghe rõ từ ngữ do tiếng ồn.")
+            print("[RENDER LOG]: Không nhận dạng được từ ngữ, dùng câu dự phòng.")
             cau_hoi_text = "Xin chào" 
 
         # Hỏi não bộ Gemini
         response = model.generate_content(cau_hoi_text)
         reply_text = response.text
-        print(f"[RENDER LOG]: Gemini đáp -> {reply_text}")
+        print(f"[RENDER LOG]: Gemini phản hồi -> {reply_text}")
         
-        # Tạo file âm thanh phản hồi
+        # Chuyển chữ thành tiếng nói phát ra loa
         tts = gTTS(text=reply_text, lang='vi')
         mp3_fp = io.BytesIO()
         tts.write_to_fp(mp3_fp)
