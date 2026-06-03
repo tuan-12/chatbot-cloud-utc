@@ -1,57 +1,53 @@
 import os
-import uuid
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse
 import google.generativeai as genai
+import speech_recognition as sr
+from gtts import gTTS
+import io
 
-app = FastAPI(title="Hệ sinh thái Chatbot IoT Độc Lập - UTC")
+app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Cấu hình API Key cố định trực tiếp để chạy trên đám mây
-GEMINI_API_KEY = "AIzaSyD3eNNWGPuKhwYgfs9c7VW7vCtUKuP4SEU"
+# 🔑 Cấu hình API Key Gemini của nhóm UTC
+GEMINI_API_KEY = "DÁN_MÃ_API_KEY_GEMINI_CỦA_NHÓM_VÀO_ĐÂY"
 genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-2.5-flash')
 
-class IoTChatRequest(BaseModel):
-    message: str
-    session_id: str = "default_iot_session"
+r = sr.Recognizer()
 
-last_gemini_reply = "Chao sep, he sinh thai doc lap da kich hoat. Toi san sang giup gi cho sep!"
-
-@app.post("/api/iot/chat")
-def iot_chat_endpoint(payload: IoTChatRequest):
-    global last_gemini_reply
+@app.post("/api/iot/audio")
+async def handle_audio_chat(file: UploadFile = File(...)):
     try:
-        # Lệnh chào mừng khi vừa cắm nguồn ngoài
-        if payload.message == "boot_welcome":
-            last_gemini_reply = "Chao sep, toi co the giup gi cho sep!"
-            return {"status": "success", "reply": last_gemini_reply}
-
-        if payload.message == "get_last":
-            return {"status": "success", "reply": last_gemini_reply}
-
-        # Truy vấn trực tiếp kho tri thức khổng lồ của Google qua Gemini 2.5 Flash
-        system_instruction = (
-            "Bạn là trợ lý AI thông minh toàn năng, kết nối không gian mạng toàn cầu. "
-            "Hãy đóng vai là trợ lý thân thiết của sếp. Trả lời bằng tiếng Việt cực kỳ ngắn gọn, "
-            "không quá 2 câu, đi thẳng vào bản chất vấn đề, không dùng ký tự markdown."
-        )
+        # 1. Đọc file âm thanh RAW từ ESP32-S3 gửi lên qua Internet
+        audio_bytes = await file.read()
         
-        model = genai.GenerativeModel(model_name='gemini-2.5-flash', system_instruction=system_instruction)
-        response = model.generate_content(contents=payload.message)
+        # Tạo file tạm Wav để đưa vào bộ nhận diện
+        audio_stream = io.BytesIO(audio_bytes)
+        with sr.AudioFile(audio_stream) as source:
+            audio_data = r.record(source)
+            # 🎙️ Dịch giọng nói bất kỳ của nhóm thành Chữ (Hỗ trợ tiếng Việt)
+            cau_hoi_text = r.recognize_google(audio_data, language="vi-VN")
         
-        # Làm sạch văn bản để vi điều khiển không bị lỗi hiển thị
-        clean_text = response.text.replace("**", "").replace("*", "").replace("`", "").strip()
-        last_gemini_reply = clean_text
+        print(f"Sếp UTC hỏi: {cau_hoi_text}")
         
-        return {"status": "success", "reply": clean_text}
-
+        # 2. Hỏi Gemini AI vạn năng (Trả lời bất kỳ câu hỏi nào)
+        response = model.generate_content(cau_hoi_text)
+        reply_text = response.text
+        
+        # 3. Chuyển chữ của Gemini thành file âm thanh Tiếng Việt công nghệ TTS
+        tts = gTTS(text=reply_text, lang='vi')
+        mp3_fp = io.BytesIO()
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        
+        # 🚀 Phóng file âm thanh ngược từ đám mây Singapore về tận cái loa trên bàn của nhóm
+        return StreamingResponse(mp3_fp, media_type="audio/mp3")
+        
     except Exception as e:
-        return {"status": "error", "reply": f"Loi ket noi Cloud: {str(e)}"}
+        # Nếu không nghe rõ, trả về một file âm thanh thông báo mặc định
+        print(f"Lỗi: {e}")
+        return {"error": str(e)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=10000)
